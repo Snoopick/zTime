@@ -10,7 +10,6 @@ public class UnitHealth : MonoBehaviour
     public Animator animator;
     private bool isDamaged = false;
     private Coroutine hitCoroutine;
-    
 
     public void Hit(int damage)
     {

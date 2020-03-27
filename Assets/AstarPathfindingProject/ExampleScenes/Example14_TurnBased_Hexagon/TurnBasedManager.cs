@@ -8,12 +8,13 @@ namespace Pathfinding.Examples {
 	[HelpURL("http://arongranberg.com/astar/docs/class_pathfinding_1_1_examples_1_1_turn_based_manager.php")]
 	public class TurnBasedManager : MonoBehaviour {
 		TurnBasedAI selected;
-
+		
 		[SerializeField] private GameObject gameCanvas;
 		[SerializeField] private GameObject menuCanvas;
+		[SerializeField] private GameObject EndGameCanvas;
 		[SerializeField] private GameObject exitZone; 
 		[SerializeField] private int needFindItems = 1;
-		[SerializeField] private int findedItems = 0;
+		public int findedItems = 0;
 		public float movementSpeed;
 		public GameObject nodePrefab;
 		public LayerMask layerMask;
@@ -37,6 +38,11 @@ namespace Pathfinding.Examples {
 		public const float reloadCooldown = 0.1f;
 		public GameObject shootPoint;
 		private bool isUpdateSpawners = false;
+		private bool isEnemyMove = false;
+		private bool issetPlayerCamers = false;
+		private bool hasAlivePlayersUnit = true;
+		public bool hardMode = false;
+		[SerializeField] private Texture2D cursorTexture;
 
 		public enum State {
 			SelectUnit,
@@ -45,6 +51,8 @@ namespace Pathfinding.Examples {
 			EnemyMove,
 			EnemyAttack,
 			SetEnemy,
+			EndEnemyTurn,
+			EndGame,
 		}
 
 		void Awake () {
@@ -55,9 +63,30 @@ namespace Pathfinding.Examples {
 		{
 			players = GameObject.FindGameObjectsWithTag("Player");
 			GetEnemies();
+			SetCursor();
 		}
 
-		void Update () {
+		void Update ()
+		{
+			if (Input.GetKeyDown(KeyCode.Mouse1))
+			{
+				DestroyPossibleMoves();
+				selected = null;
+			}
+			
+			for (int i = 0; i < players.Length; i++)
+			{
+				if (players[i].GetComponent<UnitHealth>().health < 1)
+				{
+					hasAlivePlayersUnit = false;
+				}
+			}
+
+			if (!hasAlivePlayersUnit)
+			{
+				state = State.EndGame;
+			}
+
 			var ray = Camera.main.ScreenPointToRay(Input.mousePosition);
 
 			if (findedItems >= needFindItems)
@@ -86,6 +115,8 @@ namespace Pathfinding.Examples {
 					isUpdateSpawners = false;
 				}
 				
+				GameObject.Find("MainCamera").GetComponent<MainCamera>().target = null;
+				
 				if (Input.GetKeyDown(KeyCode.Mouse0)) {
 					var unitUnderMouse = GetByRay<TurnBasedAI>(ray);
 
@@ -105,74 +136,81 @@ namespace Pathfinding.Examples {
 
 			if (state == State.EnemyMove)
 			{
-				bool isEnemyMove = true;
+				DestroyPossibleMoves();
+				if (isEnemyMove)
+				{
+					return;
+				}
 				
 				FindNearestUnit();
 				GetEnemies();
+				int enemiesWhoCanMove = 0;
 
 				if (enemys != null)
 				{
 					GameObject[] hexes = null;
-
-					while (isEnemyMove)
+					for (int i = 0; i < enemys.Length; i++)
 					{
-						int enemiesWhoCanMove = 0;
-						for (int i = 0; i < enemys.Length; i++)
+						enemiesWhoCanMove = 0;
+						isEnemyMove = true;
+
+						hexes = null;
+						nearestHex = null;
+						Select(enemys[i].GetComponent<TurnBasedAI>());
+
+						if (selected.canMove)
 						{
-							hexes = null;
-							nearestHex = null;
-							Select(enemys[i].GetComponent<TurnBasedAI>());
-
-							if (!selected.canMove)
-							{
-								continue;
-							}
-
 							enemiesWhoCanMove++;
-							selected.movementPoints = 8;
-
-							DestroyPossibleMoves();
-							GeneratePossibleMoves(selected);
+							break;
+						}
+					}
+					
+					if (enemiesWhoCanMove > 0) {
+						isEnemyMove = true;
+						GameObject.Find("MainCamera").GetComponent<MainCamera>().target = selected.transform;
 						
-							hexes = GameObject.FindGameObjectsWithTag("Hex");
-							float distance = Mathf.Infinity;
+						selected.movementPoints = 8;
 
-							for (int j = 0; j < hexes.Length; j++)
+						DestroyPossibleMoves();
+						GeneratePossibleMoves(selected);
+						
+						hexes = GameObject.FindGameObjectsWithTag("Hex");
+						float distance = Mathf.Infinity;
+						
+						for (int j = 0; j < hexes.Length; j++)
+						{
+							if (nearestHex == null)
 							{
-								if (nearestHex == null)
-								{
-									nearestHex = hexes[j];
-								}
-								else
-								{
-									Vector3 diff = hexes[j].transform.position - nearestUnit.transform.position;
-									float curDistance = diff.sqrMagnitude;
-
-									if (curDistance < distance)
-									{
-										nearestHex = hexes[j];
-										distance = curDistance;
-									}
-								}
-							}
-
-							if (nearestHex != null)
-							{
-								Astar3DButton button = nearestHex.GetComponent<Astar3DButton>();
-								selected.canMove = false;
-								HandleButton(button);
+								nearestHex = hexes[j];
 							}
 							else
 							{
-								Debug.LogError("No Hexes");
+								Vector3 diff = hexes[j].transform.position - nearestUnit.transform.position;
+								float curDistance = diff.sqrMagnitude;
+
+								if (curDistance < distance)
+								{
+									nearestHex = hexes[j];
+									distance = curDistance;
+								}
 							}
 						}
 
-						if (enemiesWhoCanMove == 0)
+						if (nearestHex != null)
 						{
-							isEnemyMove = false;
-							state = State.EnemyAttack;
+							Astar3DButton button = nearestHex.GetComponent<Astar3DButton>();
+							selected.canMove = false;
+							HandleButton(button);
 						}
+						else
+						{
+							Debug.LogError("No Hexes");
+						}
+					}
+					else
+					{
+						isEnemyMove = false;
+						state = State.EnemyAttack;
 					}
 				}
 				else
@@ -194,7 +232,21 @@ namespace Pathfinding.Examples {
 					setEnemyCoroutine = StartCoroutine(SetEnemies());					
 				}
 
+				
+				state = State.EndEnemyTurn;
+			}
+
+			if (state == State.EndEnemyTurn)
+			{
+				GameObject.Find("MainCamera").GetComponent<MainCamera>().target = players[0].transform;
 				state = State.SelectUnit;
+			}
+
+			if (state == State.EndGame)
+			{
+				gameCanvas.SetActive(false);
+				menuCanvas.SetActive(false);
+				EndGameCanvas.SetActive(true);
 			}
 		}
 		
@@ -204,11 +256,7 @@ namespace Pathfinding.Examples {
 				DestroyPossibleMoves();
 
 				TurnToPoint(button.transform);
-
-//				if (moveProcessCoroutine != null)
-//				{
-					moveProcessCoroutine = StartCoroutine(MoveToNode(selected, button.node, State.EnemyAttack));
-//				}
+				moveProcessCoroutine = StartCoroutine(MoveToNode(selected, button.node, State.EnemyMove));
 			}
 		}
 
@@ -233,24 +281,35 @@ namespace Pathfinding.Examples {
 			if (enemy != null && enemy.tag == "Enemy" && Input.GetKeyDown(KeyCode.Mouse0))
 			{
 				RaycastHit hit;
-				Ray rRay = new Ray(selected.transform.position, selectedEnemy.transform.position - selected.transform.position);
+
+				Vector3 nv = new Vector3(selected.transform.position.x, 1.5f, selected.transform.position.z);
+
+				// подумать на потом
+				Ray rRay = new Ray(nv, (selectedEnemy.transform.position - selected.transform.position).normalized);
 				Physics.Raycast(rRay, out hit);
-				Debug.DrawLine(ray.origin, hit.point, Color.red);
-				
-				if (hit.collider != null){
-					//если луч не попал в цель
-					if (hit.collider.gameObject != selectedEnemy.gameObject){
-						Debug.Log("Путь к врагу преграждает объект: "+hit.collider.name);
-					}   
-					//если луч попал в цель
-					else
+
+				if (hit.collider != null)
+				{
+					if (Physics.Linecast(shootPoint.transform.position, selectedEnemy.transform.position, out hit))
 					{
-						Debug.Log("Попадаю во врага!!!");
+						if (hit.collider.gameObject != selectedEnemy.gameObject)
+						{
+							Debug.Log("Путь к врагу преграждает объект: " + hit.collider.name + "["+hit.transform.position+"]");
+						}
+						else
+						{
+							Debug.Log("Можно стрелять");
+						}
+
+						//просто для наглядности рисуем луч в окне Scene
+						Debug.DrawLine(ray.origin, hit.point, Color.red);
 					}
-					//просто для наглядности рисуем луч в окне Scene
-					Debug.DrawLine(ray.origin, hit.point,Color.red);
 				}
-				
+				else
+				{
+					Debug.Log("Нет хита от рейкаста");
+				}
+
 				float distance = Mathf.Infinity;
 				Vector3 diff = selected.transform.position - enemy.gameObject.transform.position;
 				float curDistance = diff.sqrMagnitude;
@@ -276,6 +335,18 @@ namespace Pathfinding.Examples {
 				{
 					TurnToPoint(box.transform);
 					box.isOpened = true;					
+				}
+			}
+			
+			var pickupItem = GetByRay<Loot>(ray);
+			if (pickupItem != null && Input.GetKeyDown(KeyCode.Mouse0))
+			{
+				Debug.Log(pickupItem.name);
+				var bDistance = Vector3.Distance(selected.transform.position, box.transform.position);
+				if (bDistance < 1.5f)
+				{
+					TurnToPoint(pickupItem.transform);
+					pickupItem.PickUp();
 				}
 			}
 		}
@@ -311,22 +382,24 @@ namespace Pathfinding.Examples {
 				// generated and the player choosing which node to move to
 				Debug.LogError("Path failed:\n" + path.errorLog);
 				state = nextState;
-//				GeneratePossibleMoves(selected);
 				moveProcessCoroutine = null;
+				isEnemyMove = false;
 				yield break;
 			}
 
 			// Set the target node so other scripts know which
 			// node is the end point in the path
 			unit.targetNode = path.path[path.path.Count - 1];
-
+			selected.GetComponent<UnitSoundManager>().PlayStepSound();
 			yield return StartCoroutine(MoveAlongPath(unit, path, movementSpeed));
 
+			selected.GetComponent<UnitSoundManager>().StopPlayStepSound();
 			unit.blocker.BlockAtCurrentPosition();
 
 			// Select a new unit to move
 			state = nextState;
 			moveProcessCoroutine = null;
+			isEnemyMove = false;
 		}
 		
 		IEnumerator EnemyAttack () {
@@ -349,9 +422,11 @@ namespace Pathfinding.Examples {
 					if (Vector3.Distance(selected.transform.position, nearestUnit.transform.position) < 1.5f && unitHealth.health > 0)
 					{
 						Animator enemyAnimator = enemys[i].GetComponentInChildren<Animator>();
+						GameObject.Find("MainCamera").GetComponent<MainCamera>().target = selected.transform;
 
 						if (enemyAnimator != null)
 						{
+							selected.GetComponent<UnitSoundManager>().EnemyBite();
 							enemyAnimator.SetTrigger("Attack");
 							unitHealth.Hit(1);
 						}
@@ -366,6 +441,8 @@ namespace Pathfinding.Examples {
 				Select(enemys[i].GetComponent<TurnBasedAI>());
 				selected.canAttack = true;
 			}
+
+			GameObject.Find("MainCamera").GetComponent<MainCamera>().target = null;
 		}
 		
 		IEnumerator UnitAttack () {
@@ -375,25 +452,13 @@ namespace Pathfinding.Examples {
 			
 			reloadTimer = reloadCooldown;
 			unitAnimator.SetBool("Attack", true);
+			selected.GetComponent<UnitSoundManager>().PlayShootSound();
 
-			for (int i = 0; i < 5; i++)
+			for (int i = 0; i < 1; i++)
 			{
-				var instance = Instantiate(BulletPrefab, shootPoint.transform.position, Quaternion.identity);
-
-				Vector3 ea = transform.eulerAngles;
-				instance.transform.LookAt(selectedEnemy.transform);
-				instance.transform.eulerAngles = new Vector3(ea.x, instance.transform.eulerAngles.y, ea.z);
-
-				instance.transform.Translate(instance.transform.forward * 0.5f);
-				var rig = instance.GetComponent<Rigidbody>();
-
-				if (rig)
-				{
-					rig.velocity = Vector3.zero;
-					rig.AddForce(instance.transform.forward * 50f, ForceMode.Impulse);
-					
-				}
-
+				GameObject instance = Instantiate(BulletPrefab, shootPoint.transform.position, Quaternion.identity);
+				instance.GetComponent<Bullet>().Setup(selectedEnemy.transform.position);
+				
 				if (instance != null)
 				{
 					Destroy(instance, 4f);
@@ -440,7 +505,7 @@ namespace Pathfinding.Examples {
 				while (distanceAlongSegment < segmentLength) {
 					var interpolatedPoint = AstarSplines.CatmullRom(p0, p1, p2, p3, distanceAlongSegment / segmentLength);
 					unit.transform.position = interpolatedPoint;
-					
+
 					// Locomotion
 					/*unitAnimator.SetFloat("MoveForward", 1f);
 					unitAnimator.SetFloat("Movement", 1f);*/
@@ -455,6 +520,7 @@ namespace Pathfinding.Examples {
 				distanceAlongSegment -= segmentLength;
 			}
 
+//			TurnToPoint(path.vectorPath[path.vectorPath.Count - 1]);
 			unit.transform.position = path.vectorPath[path.vectorPath.Count - 1];
 			
 			// Locomotion
@@ -538,6 +604,13 @@ namespace Pathfinding.Examples {
 			Vector3 ea = transform.eulerAngles;
 			selected.transform.LookAt(point);
 			selected.transform.eulerAngles = new Vector3(ea.x, selected.transform.eulerAngles.y, ea.z);
+		}
+
+		private void SetCursor()
+		{
+			CursorMode mode = CursorMode.ForceSoftware;
+			Vector2 hotSpot = new Vector2(0,0);
+			Cursor.SetCursor(cursorTexture, hotSpot, mode);
 		}
 	}
 }

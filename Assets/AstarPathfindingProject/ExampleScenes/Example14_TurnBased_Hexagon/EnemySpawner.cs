@@ -38,7 +38,7 @@ public class EnemySpawner : MonoBehaviour
             enemyList[randomFromList].GetComponent<SingleNodeBlocker>().manager = blockManager;
             enemyList[randomFromList].GetComponent<TurnBasedAI>().blockManager = blockManager;
             enemyList[randomFromList].GetComponent<UnitHealth>().gameManager = gameManager;
-            enemyList[randomFromList].GetComponent<UnitHealth>().gameManager = gameManager;
+            enemyList[randomFromList].GetComponent<CoursorManager>();
             
             var obj = Instantiate(enemyList[randomFromList], new Vector3(transform.position.x, transform.position.y, transform.position.z), Quaternion.identity);
 
@@ -49,6 +49,11 @@ public class EnemySpawner : MonoBehaviour
             obj.transform.eulerAngles = new Vector3(ea.x, obj.transform.eulerAngles.y, ea.z);
 
             isSettedInTurn = true;
+        }
+
+        if (!gameManager.hardMode)
+        {
+            isEnable = false;            
         }
     }
     
